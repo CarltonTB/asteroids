@@ -8,6 +8,7 @@ struct Position {
 
 struct Ship {
     position: Position,
+    // rotation: f32,
 }
 impl Ship {
     fn render(&self) {
@@ -15,6 +16,26 @@ impl Ship {
         let v2: Vec2 = Vec2::new(self.position.x + 15.0, self.position.y - 30.0);
         let v3: Vec2 = Vec2::new(self.position.x + 30.0, self.position.y);
         draw_triangle_lines(v1, v2, v3, 1.0, WHITE)
+    }
+}
+
+struct Laser {
+    position: Position,
+}
+impl Laser {
+    fn render(&self) {
+        draw_line(
+            self.position.x,
+            self.position.y,
+            self.position.x,
+            self.position.y - 10.0,
+            1.0,
+            WHITE,
+        )
+    }
+
+    fn tick(&mut self) {
+        self.position.y -= 6.0;
     }
 }
 
@@ -51,12 +72,16 @@ struct Space {
     height: f32,
     asteroids: Vec<Asteroid>,
     player: Ship,
+    lasers: Vec<Laser>,
 }
 impl Space {
     fn render(&self) {
         self.player.render();
         for a in &self.asteroids {
             a.render();
+        }
+        for l in &self.lasers {
+            l.render();
         }
     }
 
@@ -69,6 +94,9 @@ impl Space {
                 // a.position.x = 0.0;
                 a.position.y = 0.0;
             }
+        }
+        for l in self.lasers.iter_mut() {
+            l.tick();
         }
     }
 }
@@ -83,7 +111,7 @@ async fn main() {
     let player = Ship {
         position: Position {
             x: width / 2.0,
-            y: height,
+            y: height / 2.0,
         },
     };
 
@@ -101,18 +129,49 @@ async fn main() {
         asteroids.push(asteroid)
     }
 
+    let lasers: Vec<Laser> = vec![];
+
     let mut space = Space {
         width,
         height,
         asteroids,
         player,
+        lasers,
     };
 
+    let mut laser_cooldown: u32 = 0;
     loop {
         clear_background(BLACK);
 
+        // Check for movement input
+        if is_key_down(KeyCode::W) {
+            space.player.position.y -= 2.0;
+        } else if is_key_down(KeyCode::S) {
+            space.player.position.y += 2.0;
+        } else if is_key_down(KeyCode::A) {
+            space.player.position.x -= 2.0;
+        } else if is_key_down(KeyCode::D) {
+            space.player.position.x += 2.0;
+        }
+
+        // Check for firing
+        if laser_cooldown == 0 && is_key_down(KeyCode::Space) {
+            let fired_laser = Laser {
+                position: Position {
+                    x: space.player.position.x + 15.0,
+                    y: space.player.position.y - 30.0,
+                },
+            };
+            space.lasers.push(fired_laser);
+            laser_cooldown = 30;
+        }
+
         space.tick();
         space.render();
+
+        if laser_cooldown > 0 {
+            laser_cooldown -= 1;
+        }
 
         next_frame().await
     }

@@ -5,17 +5,41 @@ struct Position {
     x: f32,
     y: f32,
 }
+impl Position {
+    fn new(x: f32, y: f32) -> Position {
+        Position { x, y }
+    }
+
+    fn distance_to(&self, p: &Position) -> f32 {
+        ((p.x - self.x).powf(2.0) + (p.y - self.y).powf(2.0)).sqrt()
+    }
+}
 
 struct Ship {
     position: Position,
     // rotation: f32,
 }
 impl Ship {
+    fn new(x: f32, y: f32) -> Ship {
+        Ship {
+            position: Position::new(x, y),
+        }
+    }
+
+    fn v1(&self) -> Vec2 {
+        Vec2::new(self.position.x, self.position.y)
+    }
+
+    fn v2(&self) -> Vec2 {
+        Vec2::new(self.position.x + 15.0, self.position.y - 30.0)
+    }
+
+    fn v3(&self) -> Vec2 {
+        Vec2::new(self.position.x + 30.0, self.position.y)
+    }
+
     fn render(&self) {
-        let v1: Vec2 = Vec2::new(self.position.x, self.position.y);
-        let v2: Vec2 = Vec2::new(self.position.x + 15.0, self.position.y - 30.0);
-        let v3: Vec2 = Vec2::new(self.position.x + 30.0, self.position.y);
-        draw_triangle_lines(v1, v2, v3, 1.0, WHITE)
+        draw_triangle_lines(self.v1(), self.v2(), self.v3(), 1.0, WHITE)
     }
 }
 
@@ -41,11 +65,21 @@ impl Laser {
 
 struct Asteroid {
     position: Position,
-    num_sides: u8,
     radius: f32,
     rotation: f32,
+    health: u32,
+    num_sides: u8,
 }
 impl Asteroid {
+    fn new(x: f32, y: f32, radius: f32) -> Asteroid {
+        Asteroid {
+            position: Position::new(x, y),
+            radius,
+            rotation: 0.0,
+            health: 1,
+            num_sides: 8,
+        }
+    }
     fn render(&self) {
         draw_poly_lines(
             self.position.x,
@@ -61,11 +95,13 @@ impl Asteroid {
     fn tick(&mut self) {
         // self.position.x += 1.0;
         self.position.y += 2.0;
-        self.rotation += ROTATION_RATE;
+        self.rotation += 0.5;
+    }
+
+    fn take_hit(&mut self) {
+        self.health -= 1;
     }
 }
-
-const ROTATION_RATE: f32 = 0.5;
 
 struct Space {
     width: f32,
@@ -95,8 +131,29 @@ impl Space {
                 a.position.y = 0.0;
             }
         }
-        for l in self.lasers.iter_mut() {
+        let mut remove_laser_indices: Vec<usize> = vec![];
+        for (i, l) in self.lasers.iter_mut().enumerate() {
             l.tick();
+
+            // check for contact with an asteroid
+            let mut remove_asteroid_indices: Vec<usize> = vec![];
+            for (j, a) in self.asteroids.iter_mut().enumerate() {
+                if l.position.distance_to(&a.position) < a.radius {
+                    a.take_hit();
+                    remove_laser_indices.push(i);
+                    if a.health == 0 {
+                        remove_asteroid_indices.push(j);
+                    }
+                    break;
+                }
+            }
+
+            for &i in &remove_asteroid_indices {
+                self.asteroids.remove(i);
+            }
+        }
+        for &i in &remove_laser_indices {
+            self.lasers.remove(i);
         }
     }
 }
@@ -108,25 +165,14 @@ async fn main() {
     let height = screen_height();
 
     // create player
-    let player = Ship {
-        position: Position {
-            x: width / 2.0,
-            y: height / 2.0,
-        },
-    };
+    let player = Ship::new(width / 2.0, height / 2.0);
 
     // generate asteroids
     let mut asteroids: Vec<Asteroid> = vec![];
     let radius: f32 = 30.0;
     for _ in 0..10 {
         let x: f32 = gen_range(radius, width - radius);
-        let asteroid = Asteroid {
-            position: Position { x, y: 0.0 },
-            num_sides: 8,
-            radius,
-            rotation: 0.0,
-        };
-        asteroids.push(asteroid)
+        asteroids.push(Asteroid::new(x, 0.0, radius))
     }
 
     let lasers: Vec<Laser> = vec![];

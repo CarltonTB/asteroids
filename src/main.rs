@@ -17,12 +17,16 @@ impl Position {
 
 struct Ship {
     position: Position,
+    health: u32,
+    iframes: u32,
     // rotation: f32,
 }
 impl Ship {
     fn new(x: f32, y: f32) -> Ship {
         Ship {
             position: Position::new(x, y),
+            health: 3,
+            iframes: 30,
         }
     }
 
@@ -39,7 +43,27 @@ impl Ship {
     }
 
     fn render(&self) {
-        draw_triangle_lines(self.v1(), self.v2(), self.v3(), 1.0, WHITE)
+        if self.health > 0 {
+            draw_triangle_lines(self.v1(), self.v2(), self.v3(), 1.0, WHITE)
+        }
+    }
+
+    fn take_hit(&mut self) {
+        if self.iframes == 0 && self.health > 0 {
+            self.health -= 1;
+            self.iframes = 30;
+        }
+    }
+
+    fn vertex_positions(&self) -> Vec<Position> {
+        let vertex_1: Vec2 = self.v1();
+        let vertex_2: Vec2 = self.v2();
+        let vertex_3: Vec2 = self.v3();
+        vec![
+            Position::new(vertex_1.x, vertex_1.y),
+            Position::new(vertex_2.x, vertex_2.y),
+            Position::new(vertex_3.x, vertex_3.y),
+        ]
     }
 }
 
@@ -99,7 +123,9 @@ impl Asteroid {
     }
 
     fn take_hit(&mut self) {
-        self.health -= 1;
+        if self.health > 0 {
+            self.health -= 1;
+        }
     }
 }
 
@@ -122,13 +148,25 @@ impl Space {
     }
 
     fn tick(&mut self) {
+        if self.player.iframes > 0 {
+            self.player.iframes -= 1;
+        }
+
         for a in self.asteroids.iter_mut() {
             a.tick();
 
-            // Reset position if offscreen
+            // reset position if offscreen
             if a.position.x + a.radius > self.width || a.position.y + a.radius > self.height {
                 // a.position.x = 0.0;
                 a.position.y = 0.0;
+            }
+
+            // check for collision with player
+            for p in self.player.vertex_positions() {
+                if p.distance_to(&a.position) < a.radius {
+                    self.player.take_hit();
+                    break;
+                }
             }
         }
         let mut remove_laser_indices: Vec<usize> = vec![];
@@ -163,9 +201,10 @@ async fn main() {
     // request_new_screen_size(1200.0, 1000.0);
     let width = screen_width();
     let height = screen_height();
+    let center: Position = Position::new(width / 2.0, height / 2.0);
 
     // create player
-    let player = Ship::new(width / 2.0, height / 2.0);
+    let player = Ship::new(center.x, height - 30.0);
 
     // generate asteroids
     let mut asteroids: Vec<Asteroid> = vec![];
@@ -217,6 +256,12 @@ async fn main() {
 
         if laser_cooldown > 0 {
             laser_cooldown -= 1;
+        }
+
+        if space.player.health == 0 {
+            draw_text("Game Over", center.x, center.y, 48.0, WHITE);
+        } else if space.asteroids.len() == 0 {
+            draw_text("You Win", center.x, center.y, 48.0, WHITE);
         }
 
         next_frame().await

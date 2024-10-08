@@ -1,5 +1,4 @@
 Asteroids TODO
 - Add asteroid random spawns
 - Split asteroids on contact with laser
-- Destroy ship on contact with asteroid
 - implement ship physics (thruster, apply acceleration during thruster firing, feeling of ship mass)

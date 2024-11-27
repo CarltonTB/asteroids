@@ -1,6 +1,12 @@
 use macroquad::prelude::*;
 use rand::gen_range;
 
+fn draw_text_h_centered(text: &str, y: f32, font_size: u16) {
+    let text_dimensions = measure_text(text, None, font_size, 1.0);
+    let x = (screen_width() - text_dimensions.width) / 2.0;
+    draw_text(text, x, y, font_size as f32, WHITE);
+}
+
 struct Position {
     x: f32,
     y: f32,
@@ -132,11 +138,58 @@ impl Asteroid {
 struct Space {
     width: f32,
     height: f32,
+    center: Position,
     asteroids: Vec<Asteroid>,
     player: Ship,
     lasers: Vec<Laser>,
 }
 impl Space {
+    fn new() -> Space {
+        let width = screen_width();
+        let height = screen_height();
+        let center: Position = Position::new(width / 2.0, height / 2.0);
+
+        // create player
+        let player = Ship::new(center.x, height - 30.0);
+
+        // generate asteroids
+        let mut asteroids: Vec<Asteroid> = vec![];
+        let radius: f32 = 30.0;
+        for _ in 0..10 {
+            let x: f32 = gen_range(radius, width - radius);
+            asteroids.push(Asteroid::new(x, 0.0, radius))
+        }
+
+        let lasers: Vec<Laser> = vec![];
+
+        Space {
+            width,
+            height,
+            center,
+            asteroids,
+            lasers,
+            player,
+        }
+    }
+
+    fn reset(&mut self) {
+        let width = screen_width();
+        let height = screen_height();
+        let center: Position = Position::new(width / 2.0, height / 2.0);
+
+        // generate asteroids
+        let mut asteroids: Vec<Asteroid> = vec![];
+        let radius: f32 = 30.0;
+        for _ in 0..10 {
+            let x: f32 = gen_range(radius, width - radius);
+            asteroids.push(Asteroid::new(x, 0.0, radius))
+        }
+
+        self.asteroids = asteroids;
+        self.lasers = vec![];
+        self.player = Ship::new(center.x, height - 30.0);
+    }
+
     fn render(&self) {
         self.player.render();
         for a in &self.asteroids {
@@ -199,69 +252,77 @@ impl Space {
 #[macroquad::main("Asteroids")]
 async fn main() {
     // request_new_screen_size(1200.0, 1000.0);
-    let width = screen_width();
-    let height = screen_height();
-    let center: Position = Position::new(width / 2.0, height / 2.0);
 
-    // create player
-    let player = Ship::new(center.x, height - 30.0);
-
-    // generate asteroids
-    let mut asteroids: Vec<Asteroid> = vec![];
-    let radius: f32 = 30.0;
-    for _ in 0..10 {
-        let x: f32 = gen_range(radius, width - radius);
-        asteroids.push(Asteroid::new(x, 0.0, radius))
-    }
-
-    let lasers: Vec<Laser> = vec![];
-
-    let mut space = Space {
-        width,
-        height,
-        asteroids,
-        player,
-        lasers,
-    };
-
+    let mut space = Space::new();
     let mut laser_cooldown: u32 = 0;
+    let mut game_started = false;
+    let mut game_over = false;
+
     loop {
         clear_background(BLACK);
-
-        // Check for movement input
-        if is_key_down(KeyCode::W) {
-            space.player.position.y -= 2.0;
-        } else if is_key_down(KeyCode::S) {
-            space.player.position.y += 2.0;
-        } else if is_key_down(KeyCode::A) {
-            space.player.position.x -= 2.0;
-        } else if is_key_down(KeyCode::D) {
-            space.player.position.x += 2.0;
+        if !game_started {
+            draw_text_h_centered("Asteroids", space.center.y, 50);
+            draw_text_h_centered("Press enter to start the game", space.center.y + 50.0, 28);
+            if is_key_down(KeyCode::Enter) {
+                game_started = true;
+            }
+            next_frame().await;
+            continue;
         }
 
-        // Check for firing
-        if laser_cooldown == 0 && is_key_down(KeyCode::Space) {
-            let fired_laser = Laser {
-                position: Position {
-                    x: space.player.position.x + 15.0,
-                    y: space.player.position.y - 30.0,
-                },
-            };
-            space.lasers.push(fired_laser);
-            laser_cooldown = 30;
-        }
+        if !game_over {
+            // Check for movement input
+            if is_key_down(KeyCode::W) {
+                space.player.position.y -= 2.0;
+            } else if is_key_down(KeyCode::S) {
+                space.player.position.y += 2.0;
+            } else if is_key_down(KeyCode::A) {
+                space.player.position.x -= 2.0;
+            } else if is_key_down(KeyCode::D) {
+                space.player.position.x += 2.0;
+            }
 
-        space.tick();
-        space.render();
+            // Check for firing
+            if laser_cooldown == 0 && is_key_down(KeyCode::Space) {
+                let fired_laser = Laser {
+                    position: Position {
+                        x: space.player.position.x + 15.0,
+                        y: space.player.position.y - 30.0,
+                    },
+                };
+                space.lasers.push(fired_laser);
+                laser_cooldown = 30;
+            }
 
-        if laser_cooldown > 0 {
-            laser_cooldown -= 1;
+            space.tick();
+            space.render();
+
+            // Update laser cooldown
+            if laser_cooldown > 0 {
+                laser_cooldown -= 1;
+            }
         }
 
         if space.player.health == 0 {
-            draw_text("Game Over", center.x, center.y, 48.0, WHITE);
+            game_over = true;
+            draw_text_h_centered("Game Over", space.center.y, 48);
+            draw_text_h_centered("Press enter to play again", space.center.y + 50.0, 28);
+            if is_key_down(KeyCode::Enter) {
+                space.reset();
+                game_over = false;
+            }
+            next_frame().await;
+            continue;
         } else if space.asteroids.len() == 0 {
-            draw_text("You Win", center.x, center.y, 48.0, WHITE);
+            game_over = true;
+            draw_text_h_centered("You Win", space.center.y, 48);
+            draw_text_h_centered("Press enter to play again", space.center.y + 50.0, 28);
+            if is_key_down(KeyCode::Enter) {
+                space.reset();
+                game_over = false;
+            }
+            next_frame().await;
+            continue;
         }
 
         next_frame().await

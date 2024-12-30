@@ -135,16 +135,17 @@ impl Asteroid {
     }
 }
 
-struct Space {
+struct GameState {
     width: f32,
     height: f32,
     center: Position,
     asteroids: Vec<Asteroid>,
     player: Ship,
     lasers: Vec<Laser>,
+    score: u32,
 }
-impl Space {
-    fn new() -> Space {
+impl GameState {
+    fn new() -> GameState {
         let width = screen_width();
         let height = screen_height();
         let center: Position = Position::new(width / 2.0, height / 2.0);
@@ -162,13 +163,14 @@ impl Space {
 
         let lasers: Vec<Laser> = vec![];
 
-        Space {
+        GameState {
             width,
             height,
             center,
             asteroids,
             lasers,
             player,
+            score: 0,
         }
     }
 
@@ -188,10 +190,14 @@ impl Space {
         self.asteroids = asteroids;
         self.lasers = vec![];
         self.player = Ship::new(center.x, height - 30.0);
+        self.score = 0;
     }
 
     fn render(&self) {
+        draw_text(&format!("Score: {}", self.score), 10.0, 28.0, 28.0, WHITE);
+
         self.player.render();
+
         for a in &self.asteroids {
             a.render();
         }
@@ -222,6 +228,8 @@ impl Space {
                 }
             }
         }
+
+        // check for lasers hitting asteroids
         let mut remove_laser_indices: Vec<usize> = vec![];
         for (i, l) in self.lasers.iter_mut().enumerate() {
             l.tick();
@@ -234,6 +242,7 @@ impl Space {
                     remove_laser_indices.push(i);
                     if a.health == 0 {
                         remove_asteroid_indices.push(j);
+                        self.score += 1;
                     }
                     break;
                 }
@@ -242,7 +251,13 @@ impl Space {
             for &i in &remove_asteroid_indices {
                 self.asteroids.remove(i);
             }
+
+            // check for offscreen lasers
+            if l.position.x > self.width || l.position.y > self.height {
+                remove_laser_indices.push(i);
+            }
         }
+
         for &i in &remove_laser_indices {
             self.lasers.remove(i);
         }
@@ -253,7 +268,7 @@ impl Space {
 async fn main() {
     // request_new_screen_size(1200.0, 1000.0);
 
-    let mut space = Space::new();
+    let mut space = GameState::new();
     let mut laser_cooldown: u32 = 0;
     let mut game_started = false;
     let mut game_over = false;

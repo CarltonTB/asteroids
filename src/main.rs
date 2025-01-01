@@ -1,3 +1,5 @@
+use std::{collections::HashSet, vec};
+
 use macroquad::prelude::*;
 use rand::gen_range;
 
@@ -7,6 +9,7 @@ fn draw_text_h_centered(text: &str, y: f32, font_size: u16) {
     draw_text(text, x, y, font_size as f32, WHITE);
 }
 
+#[derive(Clone)]
 struct Position {
     x: f32,
     y: f32,
@@ -21,9 +24,21 @@ impl Position {
     }
 }
 
+#[derive(Clone)]
+struct Velocity {
+    // Velocity in pixels per second
+    x: f32,
+    y: f32,
+}
+impl Velocity {
+    fn new(x: f32, y: f32) -> Velocity {
+        Velocity { x, y }
+    }
+}
+
 struct Ship {
     position: Position,
-    health: u32,
+    health: usize,
     iframes: u32,
     // rotation: f32,
 }
@@ -31,8 +46,8 @@ impl Ship {
     fn new(x: f32, y: f32) -> Ship {
         Ship {
             position: Position::new(x, y),
-            health: 3,
-            iframes: 30,
+            health: 5,
+            iframes: 120,
         }
     }
 
@@ -73,10 +88,21 @@ impl Ship {
     }
 }
 
+#[derive(Clone)]
 struct Laser {
+    id: u32,
     position: Position,
+    velocity: Velocity,
 }
 impl Laser {
+    fn new(x_pos: f32, y_pos: f32, x_vel: f32, y_vel: f32, id: u32) -> Laser {
+        Laser {
+            id,
+            position: Position::new(x_pos, y_pos),
+            velocity: Velocity::new(x_vel, y_vel),
+        }
+    }
+
     fn render(&self) {
         draw_line(
             self.position.x,
@@ -88,28 +114,35 @@ impl Laser {
         )
     }
 
-    fn tick(&mut self) {
-        self.position.y -= 6.0;
+    fn tick(&mut self, frame_time: f32) {
+        self.position.x += self.velocity.x * frame_time;
+        self.position.y += self.velocity.y * frame_time;
     }
 }
 
+#[derive(Clone)]
 struct Asteroid {
+    id: u32,
     position: Position,
+    velocity: Velocity,
     radius: f32,
     rotation: f32,
     health: u32,
     num_sides: u8,
 }
 impl Asteroid {
-    fn new(x: f32, y: f32, radius: f32) -> Asteroid {
+    fn new(x_pos: f32, y_pos: f32, x_vel: f32, y_vel: f32, radius: f32, id: u32) -> Asteroid {
         Asteroid {
-            position: Position::new(x, y),
+            id,
+            position: Position::new(x_pos, y_pos),
+            velocity: Velocity::new(x_vel, y_vel),
             radius,
             rotation: 0.0,
             health: 1,
             num_sides: 8,
         }
     }
+
     fn render(&self) {
         draw_poly_lines(
             self.position.x,
@@ -122,10 +155,10 @@ impl Asteroid {
         );
     }
 
-    fn tick(&mut self) {
-        // self.position.x += 1.0;
-        self.position.y += 2.0;
-        self.rotation += 0.5;
+    fn tick(&mut self, frame_time: f32) {
+        self.position.x += self.velocity.x * frame_time;
+        self.position.y += self.velocity.y * frame_time;
+        self.rotation += 30.0 * frame_time;
     }
 
     fn take_hit(&mut self) {
@@ -135,43 +168,35 @@ impl Asteroid {
     }
 }
 
-struct GameState {
+struct Game {
     width: f32,
     height: f32,
     center: Position,
-    asteroids: Vec<Asteroid>,
     player: Ship,
+    asteroids: Vec<Asteroid>,
+    asteroid_counter: u32,
     lasers: Vec<Laser>,
+    laser_counter: u32,
     score: u32,
 }
-impl GameState {
-    fn new() -> GameState {
+impl Game {
+    fn new() -> Game {
         let width = screen_width();
         let height = screen_height();
-        let center: Position = Position::new(width / 2.0, height / 2.0);
 
-        // create player
-        let player = Ship::new(center.x, height - 30.0);
-
-        // generate asteroids
-        let mut asteroids: Vec<Asteroid> = vec![];
-        let radius: f32 = 30.0;
-        for _ in 0..10 {
-            let x: f32 = gen_range(radius, width - radius);
-            asteroids.push(Asteroid::new(x, 0.0, radius))
-        }
-
-        let lasers: Vec<Laser> = vec![];
-
-        GameState {
+        let mut game = Game {
             width,
             height,
-            center,
-            asteroids,
-            lasers,
-            player,
+            center: Position::new(width / 2.0, height / 2.0),
+            asteroids: vec![],
+            lasers: vec![],
+            player: Ship::new(width / 2.0, height - 30.0),
             score: 0,
-        }
+            asteroid_counter: 0,
+            laser_counter: 0,
+        };
+        game.generate_asteroids();
+        game
     }
 
     fn reset(&mut self) {
@@ -179,15 +204,8 @@ impl GameState {
         let height = screen_height();
         let center: Position = Position::new(width / 2.0, height / 2.0);
 
-        // generate asteroids
-        let mut asteroids: Vec<Asteroid> = vec![];
-        let radius: f32 = 30.0;
-        for _ in 0..10 {
-            let x: f32 = gen_range(radius, width - radius);
-            asteroids.push(Asteroid::new(x, 0.0, radius))
-        }
-
-        self.asteroids = asteroids;
+        self.asteroids = vec![];
+        self.generate_asteroids();
         self.lasers = vec![];
         self.player = Ship::new(center.x, height - 30.0);
         self.score = 0;
@@ -195,6 +213,13 @@ impl GameState {
 
     fn render(&self) {
         draw_text(&format!("Score: {}", self.score), 10.0, 28.0, 28.0, WHITE);
+        draw_text(
+            &format!("Health: {}", "<3 ".repeat(self.player.health)),
+            150.0,
+            28.0,
+            28.0,
+            WHITE,
+        );
 
         self.player.render();
 
@@ -206,60 +231,83 @@ impl GameState {
         }
     }
 
-    fn tick(&mut self) {
+    fn tick(&mut self, frame_time: f32) {
         if self.player.iframes > 0 {
             self.player.iframes -= 1;
         }
 
+        let mut remove_asteroid_ids: HashSet<u32> = HashSet::new();
         for a in self.asteroids.iter_mut() {
-            a.tick();
+            a.tick(frame_time);
 
-            // reset position if offscreen
+            // destroy offscreen asteroids
             if a.position.x + a.radius > self.width || a.position.y + a.radius > self.height {
-                // a.position.x = 0.0;
-                a.position.y = 0.0;
+                remove_asteroid_ids.insert(a.id);
             }
 
             // check for collision with player
             for p in self.player.vertex_positions() {
                 if p.distance_to(&a.position) < a.radius {
                     self.player.take_hit();
-                    break;
+                    remove_asteroid_ids.insert(a.id);
                 }
             }
         }
 
         // check for lasers hitting asteroids
-        let mut remove_laser_indices: Vec<usize> = vec![];
-        for (i, l) in self.lasers.iter_mut().enumerate() {
-            l.tick();
+        let mut remove_laser_ids: HashSet<u32> = HashSet::new();
+        for l in self.lasers.iter_mut() {
+            l.tick(frame_time);
 
             // check for contact with an asteroid
-            let mut remove_asteroid_indices: Vec<usize> = vec![];
-            for (j, a) in self.asteroids.iter_mut().enumerate() {
+            for a in self.asteroids.iter_mut() {
                 if l.position.distance_to(&a.position) < a.radius {
                     a.take_hit();
-                    remove_laser_indices.push(i);
+                    remove_laser_ids.insert(l.id);
                     if a.health == 0 {
-                        remove_asteroid_indices.push(j);
+                        remove_asteroid_ids.insert(a.id);
                         self.score += 1;
                     }
                     break;
                 }
             }
 
-            for &i in &remove_asteroid_indices {
-                self.asteroids.remove(i);
-            }
-
             // check for offscreen lasers
             if l.position.x > self.width || l.position.y > self.height {
-                remove_laser_indices.push(i);
+                remove_laser_ids.insert(l.id);
             }
         }
 
-        for &i in &remove_laser_indices {
-            self.lasers.remove(i);
+        self.asteroids = self
+            .asteroids
+            .iter()
+            .cloned()
+            .filter(|a| !remove_asteroid_ids.contains(&a.id))
+            .collect();
+
+        self.lasers = self
+            .lasers
+            .iter()
+            .cloned()
+            .filter(|l| !remove_laser_ids.contains(&l.id))
+            .collect();
+
+        self.generate_asteroids();
+    }
+
+    fn generate_asteroids(&mut self) {
+        let radius: f32 = 30.0;
+        for _ in 0..10 - self.asteroids.len() {
+            let x: f32 = gen_range(radius, self.width - radius);
+            self.asteroid_counter += 1;
+            self.asteroids.push(Asteroid::new(
+                x,
+                0.0,
+                0.0,
+                200.0,
+                radius,
+                self.asteroid_counter,
+            ))
         }
     }
 }
@@ -268,16 +316,24 @@ impl GameState {
 async fn main() {
     // request_new_screen_size(1200.0, 1000.0);
 
-    let mut space = GameState::new();
-    let mut laser_cooldown: u32 = 0;
+    let mut game = Game::new();
+
+    // cooldown in seconds
+    const LASER_COOLDOWN: f32 = 0.3;
+    // pixels per second
+    const PLAYER_SPEED: f32 = 300.0;
+
+    let mut laser_cooldown_remaining: f32 = 0.0;
     let mut game_started = false;
     let mut game_over = false;
 
     loop {
+        let frame_time: f32 = get_frame_time();
+
         clear_background(BLACK);
         if !game_started {
-            draw_text_h_centered("Asteroids", space.center.y, 50);
-            draw_text_h_centered("Press enter to start the game", space.center.y + 50.0, 28);
+            draw_text_h_centered("Asteroids", game.center.y, 50);
+            draw_text_h_centered("Press enter to start the game", game.center.y + 50.0, 28);
             if is_key_down(KeyCode::Enter) {
                 game_started = true;
             }
@@ -286,58 +342,57 @@ async fn main() {
         }
 
         if !game_over {
+            let move_distance = PLAYER_SPEED * frame_time;
             // Check for movement input
             if is_key_down(KeyCode::W) {
-                space.player.position.y -= 2.0;
+                game.player.position.y -= move_distance;
             } else if is_key_down(KeyCode::S) {
-                space.player.position.y += 2.0;
+                game.player.position.y += move_distance;
             } else if is_key_down(KeyCode::A) {
-                space.player.position.x -= 2.0;
+                game.player.position.x -= move_distance;
             } else if is_key_down(KeyCode::D) {
-                space.player.position.x += 2.0;
+                game.player.position.x += move_distance;
             }
 
             // Check for firing
-            if laser_cooldown == 0 && is_key_down(KeyCode::Space) {
-                let fired_laser = Laser {
-                    position: Position {
-                        x: space.player.position.x + 15.0,
-                        y: space.player.position.y - 30.0,
-                    },
-                };
-                space.lasers.push(fired_laser);
-                laser_cooldown = 30;
+            if laser_cooldown_remaining <= 0.0 && is_key_down(KeyCode::Space) {
+                game.laser_counter += 1;
+                let fired_laser = Laser::new(
+                    game.player.position.x + 15.0,
+                    game.player.position.y - 30.0,
+                    0.0,
+                    -400.0,
+                    game.laser_counter,
+                );
+                game.lasers.push(fired_laser);
+                laser_cooldown_remaining = LASER_COOLDOWN;
             }
 
-            space.tick();
-            space.render();
+            game.tick(frame_time);
+            game.render();
 
             // Update laser cooldown
-            if laser_cooldown > 0 {
-                laser_cooldown -= 1;
+            if laser_cooldown_remaining > 0.0 {
+                laser_cooldown_remaining -= frame_time;
             }
         }
 
-        if space.player.health == 0 {
+        if game.player.health == 0 {
             game_over = true;
-            draw_text_h_centered("Game Over", space.center.y, 48);
-            draw_text_h_centered("Press enter to play again", space.center.y + 50.0, 28);
+            draw_text_h_centered("Game Over", game.center.y, 48);
+            draw_text_h_centered("Press enter to play again", game.center.y + 50.0, 28);
             if is_key_down(KeyCode::Enter) {
-                space.reset();
+                game.reset();
                 game_over = false;
             }
-            next_frame().await;
-            continue;
-        } else if space.asteroids.len() == 0 {
+        } else if game.score == 20 {
             game_over = true;
-            draw_text_h_centered("You Win", space.center.y, 48);
-            draw_text_h_centered("Press enter to play again", space.center.y + 50.0, 28);
+            draw_text_h_centered("You Win", game.center.y, 48);
+            draw_text_h_centered("Press enter to play again", game.center.y + 50.0, 28);
             if is_key_down(KeyCode::Enter) {
-                space.reset();
+                game.reset();
                 game_over = false;
             }
-            next_frame().await;
-            continue;
         }
 
         next_frame().await

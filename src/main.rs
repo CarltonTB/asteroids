@@ -175,6 +175,7 @@ struct Game {
     player_speed: f32,
     asteroids: Vec<Asteroid>,
     asteroid_counter: u32,
+    max_asteroids: usize,
     lasers: Vec<Laser>,
     laser_counter: u32,
     laser_cooldown: f32,
@@ -194,9 +195,10 @@ impl Game {
             player_speed: 300.0,
             asteroids: vec![],
             asteroid_counter: 0,
+            max_asteroids: 10,
             lasers: vec![],
             laser_counter: 0,
-            laser_cooldown: 0.3,
+            laser_cooldown: 0.2,
             laser_cooldown_remaining: 0.0,
             score: 0,
         };
@@ -277,7 +279,7 @@ impl Game {
             a.tick(frame_time);
 
             // destroy offscreen asteroids
-            if a.position.x + a.radius > self.width || a.position.y + a.radius > self.height {
+            if a.position.x > self.width + a.radius || a.position.y > self.height + a.radius {
                 remove_asteroid_ids.insert(a.id);
             }
 
@@ -332,8 +334,8 @@ impl Game {
     }
 
     fn generate_asteroids(&mut self) {
-        let radius: f32 = 30.0;
-        for _ in 0..10 - self.asteroids.len() {
+        for _ in 0..self.max_asteroids - self.asteroids.len() {
+            let radius: f32 = gen_range(10.0, 50.0);
             let x: f32 = gen_range(radius, self.width - radius);
             self.asteroid_counter += 1;
             self.asteroids.push(Asteroid::new(
@@ -352,7 +354,7 @@ impl Game {
             draw_text_h_centered("Game Over", self.center.y, 48);
             draw_text_h_centered("Press enter to play again", self.center.y + 50.0, 28);
             return true;
-        } else if self.score == 20 {
+        } else if self.score == 100 {
             draw_text_h_centered("You Win", self.center.y, 48);
             draw_text_h_centered("Press enter to play again", self.center.y + 50.0, 28);
             return true;

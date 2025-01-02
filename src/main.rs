@@ -1,7 +1,6 @@
-use std::{collections::HashSet, vec};
-
 use macroquad::prelude::*;
 use rand::gen_range;
+use std::{collections::HashSet, vec};
 
 fn draw_text_h_centered(text: &str, y: f32, font_size: u16) {
     let text_dimensions = measure_text(text, None, font_size, 1.0);
@@ -173,10 +172,13 @@ struct Game {
     height: f32,
     center: Position,
     player: Ship,
+    player_speed: f32,
     asteroids: Vec<Asteroid>,
     asteroid_counter: u32,
     lasers: Vec<Laser>,
     laser_counter: u32,
+    laser_cooldown: f32,
+    laser_cooldown_remaining: f32,
     score: u32,
 }
 impl Game {
@@ -188,12 +190,15 @@ impl Game {
             width,
             height,
             center: Position::new(width / 2.0, height / 2.0),
-            asteroids: vec![],
-            lasers: vec![],
             player: Ship::new(width / 2.0, height - 30.0),
-            score: 0,
+            player_speed: 300.0,
+            asteroids: vec![],
             asteroid_counter: 0,
+            lasers: vec![],
             laser_counter: 0,
+            laser_cooldown: 0.3,
+            laser_cooldown_remaining: 0.0,
+            score: 0,
         };
         game.generate_asteroids();
         game
@@ -232,6 +237,37 @@ impl Game {
     }
 
     fn tick(&mut self, frame_time: f32) {
+        let move_distance = self.player_speed * frame_time;
+
+        // Check for movement input
+        if is_key_down(KeyCode::W) {
+            self.player.position.y -= move_distance;
+        } else if is_key_down(KeyCode::S) {
+            self.player.position.y += move_distance;
+        } else if is_key_down(KeyCode::A) {
+            self.player.position.x -= move_distance;
+        } else if is_key_down(KeyCode::D) {
+            self.player.position.x += move_distance;
+        }
+
+        // Check for firing
+        if self.laser_cooldown_remaining <= 0.0 && is_key_down(KeyCode::Space) {
+            self.laser_counter += 1;
+            let fired_laser = Laser::new(
+                self.player.position.x + 15.0,
+                self.player.position.y - 30.0,
+                0.0,
+                -400.0,
+                self.laser_counter,
+            );
+            self.lasers.push(fired_laser);
+            self.laser_cooldown_remaining = self.laser_cooldown;
+        }
+
+        if self.laser_cooldown_remaining > 0.0 {
+            self.laser_cooldown_remaining -= frame_time;
+        }
+
         if self.player.iframes > 0 {
             self.player.iframes -= 1;
         }
@@ -310,6 +346,19 @@ impl Game {
             ))
         }
     }
+
+    fn check_game_over(&self) -> bool {
+        if self.player.health == 0 {
+            draw_text_h_centered("Game Over", self.center.y, 48);
+            draw_text_h_centered("Press enter to play again", self.center.y + 50.0, 28);
+            return true;
+        } else if self.score == 20 {
+            draw_text_h_centered("You Win", self.center.y, 48);
+            draw_text_h_centered("Press enter to play again", self.center.y + 50.0, 28);
+            return true;
+        }
+        false
+    }
 }
 
 #[macroquad::main("Asteroids")]
@@ -318,12 +367,6 @@ async fn main() {
 
     let mut game = Game::new();
 
-    // cooldown in seconds
-    const LASER_COOLDOWN: f32 = 0.3;
-    // pixels per second
-    const PLAYER_SPEED: f32 = 300.0;
-
-    let mut laser_cooldown_remaining: f32 = 0.0;
     let mut game_started = false;
     let mut game_over = false;
 
@@ -334,66 +377,18 @@ async fn main() {
         if !game_started {
             draw_text_h_centered("Asteroids", game.center.y, 50);
             draw_text_h_centered("Press enter to start the game", game.center.y + 50.0, 28);
-            if is_key_down(KeyCode::Enter) {
-                game_started = true;
-            }
-            next_frame().await;
-            continue;
         }
 
-        if !game_over {
-            let move_distance = PLAYER_SPEED * frame_time;
-            // Check for movement input
-            if is_key_down(KeyCode::W) {
-                game.player.position.y -= move_distance;
-            } else if is_key_down(KeyCode::S) {
-                game.player.position.y += move_distance;
-            } else if is_key_down(KeyCode::A) {
-                game.player.position.x -= move_distance;
-            } else if is_key_down(KeyCode::D) {
-                game.player.position.x += move_distance;
-            }
-
-            // Check for firing
-            if laser_cooldown_remaining <= 0.0 && is_key_down(KeyCode::Space) {
-                game.laser_counter += 1;
-                let fired_laser = Laser::new(
-                    game.player.position.x + 15.0,
-                    game.player.position.y - 30.0,
-                    0.0,
-                    -400.0,
-                    game.laser_counter,
-                );
-                game.lasers.push(fired_laser);
-                laser_cooldown_remaining = LASER_COOLDOWN;
-            }
-
+        if !game_over && game_started {
             game.tick(frame_time);
             game.render();
-
-            // Update laser cooldown
-            if laser_cooldown_remaining > 0.0 {
-                laser_cooldown_remaining -= frame_time;
-            }
+        } else if is_key_down(KeyCode::Enter) {
+            game.reset();
+            game_over = false;
+            game_started = true;
+            continue;
         }
-
-        if game.player.health == 0 {
-            game_over = true;
-            draw_text_h_centered("Game Over", game.center.y, 48);
-            draw_text_h_centered("Press enter to play again", game.center.y + 50.0, 28);
-            if is_key_down(KeyCode::Enter) {
-                game.reset();
-                game_over = false;
-            }
-        } else if game.score == 20 {
-            game_over = true;
-            draw_text_h_centered("You Win", game.center.y, 48);
-            draw_text_h_centered("Press enter to play again", game.center.y + 50.0, 28);
-            if is_key_down(KeyCode::Enter) {
-                game.reset();
-                game_over = false;
-            }
-        }
+        game_over = game.check_game_over();
 
         next_frame().await
     }

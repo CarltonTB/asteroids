@@ -1,6 +1,6 @@
 use macroquad::prelude::*;
 use rand::gen_range;
-use std::{collections::HashSet, vec};
+use std::{cmp, collections::HashSet, vec};
 
 fn draw_text_h_centered(text: &str, y: f32, font_size: u16) {
     let text_dimensions = measure_text(text, None, font_size, 1.0);
@@ -294,6 +294,7 @@ impl Game {
 
         // check for lasers hitting asteroids
         let mut remove_laser_ids: HashSet<u32> = HashSet::new();
+        let mut split_asteroids: Vec<Asteroid> = vec![];
         for l in self.lasers.iter_mut() {
             l.tick(frame_time);
 
@@ -304,6 +305,29 @@ impl Game {
                     remove_laser_ids.insert(l.id);
                     if a.health == 0 {
                         remove_asteroid_ids.insert(a.id);
+
+                        // Split asteroid
+                        if a.radius > 20.0 {
+                            let new_radius = a.radius / 2.0;
+                            split_asteroids.push(Asteroid::new(
+                                a.position.x,
+                                a.position.y,
+                                -(a.velocity.y / 2.0),
+                                a.velocity.y,
+                                new_radius,
+                                self.asteroid_counter + 1,
+                            ));
+                            split_asteroids.push(Asteroid::new(
+                                a.position.x,
+                                a.position.y,
+                                a.velocity.y / 2.0,
+                                a.velocity.y,
+                                new_radius,
+                                self.asteroid_counter + 2,
+                            ));
+                            self.asteroid_counter += 2;
+                        }
+
                         self.score += 1;
                     }
                     break;
@@ -331,10 +355,12 @@ impl Game {
             .collect();
 
         self.generate_asteroids();
+
+        self.asteroids.extend(split_asteroids);
     }
 
     fn generate_asteroids(&mut self) {
-        for _ in 0..self.max_asteroids - self.asteroids.len() {
+        for _ in 0..self.max_asteroids - cmp::min(self.asteroids.len(), self.max_asteroids) {
             let radius: f32 = gen_range(10.0, 50.0);
             let x: f32 = gen_range(radius, self.width - radius);
             self.asteroid_counter += 1;
@@ -352,11 +378,13 @@ impl Game {
     fn check_game_over(&self) -> bool {
         if self.player.health == 0 {
             draw_text_h_centered("Game Over", self.center.y, 48);
-            draw_text_h_centered("Press enter to play again", self.center.y + 50.0, 28);
+            draw_text_h_centered(&format!("Score: {}", self.score), self.center.y + 50.0, 28);
+            draw_text_h_centered("Press enter to play again", self.center.y + 100.0, 28);
             return true;
         } else if self.score == 100 {
             draw_text_h_centered("You Win", self.center.y, 48);
-            draw_text_h_centered("Press enter to play again", self.center.y + 50.0, 28);
+            draw_text_h_centered(&format!("Score: {}", self.score), self.center.y + 50.0, 28);
+            draw_text_h_centered("Press enter to play again", self.center.y + 100.0, 28);
             return true;
         }
         false

@@ -1,7 +1,5 @@
 Asteroids TODO
 - Prevent ship from being able to go off screen
-- Make asteroids come from all angles
-- Make ship start in the center
 - Non-overlapping asteroid generation
 - Add particle effects on asteroid splitting
 - implement ship physics (thruster, apply acceleration during thruster firing, feeling of ship mass)

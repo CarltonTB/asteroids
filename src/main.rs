@@ -89,11 +89,13 @@ impl Laser {
     }
 
     fn render(&self) {
+        let length = 10.0;
+        let angle = self.velocity.y.atan2(self.velocity.x);
         draw_line(
             self.position.x,
             self.position.y,
-            self.position.x,
-            self.position.y - 10.0,
+            self.position.x + length * angle.cos(),
+            self.position.y + length * angle.sin(),
             1.0,
             WHITE,
         )
@@ -172,16 +174,17 @@ impl Game {
     fn new() -> Game {
         let width = screen_width();
         let height = screen_height();
+        let center = Vec2::new(width / 2.0, height / 2.0);
 
         let mut game = Game {
             width,
             height,
-            center: Vec2::new(width / 2.0, height / 2.0),
-            player: Ship::new(width / 2.0, height - 30.0),
+            center,
+            player: Ship::new(center.x, center.y),
             player_speed: 300.0,
             asteroids: vec![],
             asteroid_counter: 0,
-            max_asteroids: 10,
+            max_asteroids: 20,
             lasers: vec![],
             laser_counter: 0,
             laser_cooldown: 0.2,
@@ -200,7 +203,7 @@ impl Game {
         self.asteroids = vec![];
         self.generate_asteroids();
         self.lasers = vec![];
-        self.player = Ship::new(center.x, height - 30.0);
+        self.player = Ship::new(center.x, center.y);
         self.score = 0;
     }
 
@@ -275,7 +278,11 @@ impl Game {
             a.tick(frame_time);
 
             // destroy offscreen asteroids
-            if a.position.x > self.width + a.radius || a.position.y > self.height + a.radius {
+            if a.position.x > self.width + a.radius
+                || a.position.y > self.height + a.radius
+                || a.position.x < -a.radius
+                || a.position.y < -a.radius
+            {
                 remove_asteroid_ids.insert(a.id);
             }
 
@@ -356,15 +363,117 @@ impl Game {
     }
 
     fn generate_asteroids(&mut self) {
-        for _ in 0..self.max_asteroids - cmp::min(self.asteroids.len(), self.max_asteroids) {
-            let radius: f32 = gen_range(10.0, 50.0);
+        // Split generation evenly across the 4 screen boundaries
+        // Generate asteroids moving roughly toward the center of the screen
+
+        let num_asteroids = self.max_asteroids - cmp::min(self.asteroids.len(), self.max_asteroids);
+        let asteroids_per_boundary = num_asteroids / 4;
+
+        let min_radius = 10.0;
+        let max_radius = 100.0;
+        let speed = 100.0;
+        let angle_variation_degrees = 30.0;
+
+        // Left boundary
+        for _ in 0..asteroids_per_boundary {
+            let radius: f32 = gen_range(min_radius, max_radius);
+            let y: f32 = gen_range(radius, self.height - radius);
+
+            let delta_x = self.center.x;
+            let delta_y = self.center.y - y;
+
+            let angle_toward_center = delta_y.atan2(delta_x).to_degrees();
+
+            // add random variation to the angle
+            let angle =
+                (angle_toward_center + gen_range(0.0, angle_variation_degrees)).to_radians();
+            let x_vel = speed * angle.cos();
+            let y_vel = speed * angle.sin();
+
+            self.asteroid_counter += 1;
+            self.asteroids.push(Asteroid::new(
+                0.0,
+                y,
+                x_vel,
+                y_vel,
+                radius,
+                self.asteroid_counter,
+            ))
+        }
+
+        // Top boundary
+        for _ in 0..asteroids_per_boundary {
+            let radius: f32 = gen_range(min_radius, max_radius);
             let x: f32 = gen_range(radius, self.width - radius);
+            let delta_x = self.center.x - x;
+            let delta_y = self.center.y;
+
+            let angle_toward_center = delta_y.atan2(delta_x).to_degrees();
+
+            // add random variation to the angle
+            let angle =
+                (angle_toward_center + gen_range(0.0, angle_variation_degrees)).to_radians();
+            let x_vel = speed * angle.cos();
+            let y_vel = speed * angle.sin();
+
             self.asteroid_counter += 1;
             self.asteroids.push(Asteroid::new(
                 x,
                 0.0,
-                0.0,
-                200.0,
+                x_vel,
+                y_vel,
+                radius,
+                self.asteroid_counter,
+            ))
+        }
+
+        // Right boundary
+        for _ in 0..asteroids_per_boundary {
+            let radius: f32 = gen_range(min_radius, max_radius);
+            let y: f32 = gen_range(radius, self.height - radius);
+            let delta_x = self.center.x - self.width;
+            let delta_y = self.center.y - y;
+
+            let angle_toward_center = delta_y.atan2(delta_x).to_degrees();
+
+            // add random variation to the angle
+            let angle =
+                (angle_toward_center + gen_range(0.0, angle_variation_degrees)).to_radians();
+            let x_vel = speed * angle.cos();
+            let y_vel = speed * angle.sin();
+
+            self.asteroid_counter += 1;
+            self.asteroids.push(Asteroid::new(
+                self.width,
+                y,
+                x_vel,
+                y_vel,
+                radius,
+                self.asteroid_counter,
+            ))
+        }
+
+        // Bottom boundary
+        for _ in 0..asteroids_per_boundary {
+            let radius: f32 = gen_range(min_radius, max_radius);
+            let x: f32 = gen_range(radius, self.width - radius);
+            let delta_x = self.center.x - x;
+            let delta_y = self.center.y - self.height;
+
+            let angle_toward_center = delta_y.atan2(delta_x).to_degrees();
+
+            // add random variation to the angle
+            let angle =
+                (angle_toward_center + gen_range(0.0, angle_variation_degrees)).to_radians();
+            let x_vel = speed * angle.cos();
+            let y_vel = speed * angle.sin();
+
+            self.asteroid_counter += 1;
+            self.asteroids.push(Asteroid::new(
+                x,
+                self.height,
+                x_vel,
+                y_vel,
                 radius,
                 self.asteroid_counter,
             ))

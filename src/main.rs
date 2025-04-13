@@ -15,6 +15,7 @@ fn distance(p1: &Vec2, p2: &Vec2) -> f32 {
 
 struct Ship {
     position: Vec2,
+    velocity: Vec2,
     health: usize,
     iframes: u32,
     // Rotation in radians
@@ -25,6 +26,7 @@ impl Ship {
         let rotation_degrees: f32 = 270.0;
         Ship {
             position: Vec2::new(x, y),
+            velocity: Vec2::new(0.0, 0.0),
             health: 5,
             iframes: 120,
             rotation: rotation_degrees.to_radians(),
@@ -160,7 +162,6 @@ struct Game {
     height: f32,
     center: Vec2,
     player: Ship,
-    player_speed: f32,
     asteroids: Vec<Asteroid>,
     asteroid_counter: u32,
     max_asteroids: usize,
@@ -181,7 +182,6 @@ impl Game {
             height,
             center,
             player: Ship::new(center.x, center.y),
-            player_speed: 300.0,
             asteroids: vec![],
             asteroid_counter: 0,
             max_asteroids: 20,
@@ -228,18 +228,18 @@ impl Game {
     }
 
     fn tick(&mut self, frame_time: f32) {
-        let move_distance = self.player_speed * frame_time;
         let rotation_degrees: f32 = 250.0 * frame_time;
+        let thrust: f32 = 5.0 * frame_time;
 
         // Check for movement input
         if is_key_down(KeyCode::W) {
-            // Move forward
-            self.player.position.y += move_distance * self.player.rotation.sin();
-            self.player.position.x += move_distance * self.player.rotation.cos();
+            // Apply forward thrust
+            self.player.velocity.x += thrust * self.player.rotation.cos();
+            self.player.velocity.y += thrust * self.player.rotation.sin();
         } else if is_key_down(KeyCode::S) {
-            // Move backward
-            self.player.position.y -= move_distance * self.player.rotation.sin();
-            self.player.position.x -= move_distance * self.player.rotation.cos();
+            // Apply backward thrust
+            self.player.velocity.x -= thrust * self.player.rotation.cos();
+            self.player.velocity.y -= thrust * self.player.rotation.sin();
         }
 
         if is_key_down(KeyCode::A) {
@@ -250,15 +250,35 @@ impl Game {
             self.player.rotation += rotation_degrees.to_radians();
         }
 
+        // Update player position according to velocity
+        let min_x: f32 = 0.0;
+        let max_x: f32 = self.width;
+        self.player.position.x =
+            max_x.min(min_x.max(self.player.position.x + self.player.velocity.x));
+
+        let min_y: f32 = 0.0;
+        let max_y: f32 = self.height;
+        self.player.position.y =
+            max_y.min(min_y.max(self.player.position.y + self.player.velocity.y));
+
+        if self.player.position.x == min_x || self.player.position.x == max_x {
+            self.player.velocity.x = 0.0;
+        }
+
+        if self.player.position.y == min_y || self.player.position.y == max_y {
+            self.player.velocity.y = 0.0;
+        }
+
         // Check for firing
+        const LAZER_VEL: f32 = 400.00;
         if self.laser_cooldown_remaining <= 0.0 && is_key_down(KeyCode::Space) {
             self.laser_counter += 1;
             let front = self.player.vertices()[1];
             let fired_laser = Laser::new(
                 front.x,
                 front.y,
-                400.0 * self.player.rotation.cos(),
-                400.0 * self.player.rotation.sin(),
+                self.player.velocity.x + LAZER_VEL * self.player.rotation.cos(),
+                self.player.velocity.y + LAZER_VEL * self.player.rotation.sin(),
                 self.laser_counter,
             );
             self.lasers.push(fired_laser);
@@ -338,7 +358,11 @@ impl Game {
             }
 
             // check for offscreen lasers
-            if l.position.x > self.width || l.position.y > self.height {
+            if l.position.x > self.width
+                || l.position.y > self.height
+                || l.position.x < 0.0
+                || l.position.y < 0.0
+            {
                 remove_laser_ids.insert(l.id);
             }
         }

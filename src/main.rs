@@ -157,6 +157,42 @@ impl Asteroid {
     }
 }
 
+#[derive(Clone)]
+struct Particle {
+    position: Vec2,
+    velocity: Vec2,
+    lifetime: f32,
+    size: f32,
+}
+
+impl Particle {
+    fn new(x: f32, y: f32, speed: f32) -> Self {
+        let angle = gen_range(0.0, std::f32::consts::TAU);
+        Particle {
+            position: Vec2::new(x, y),
+            velocity: Vec2::new(speed * angle.cos(), speed * angle.sin()),
+            lifetime: 1.0,
+            size: gen_range(2.0, 6.0),
+        }
+    }
+
+    fn tick(&mut self, frame_time: f32) {
+        self.position += self.velocity * frame_time;
+        self.lifetime -= frame_time * 2.0;
+        self.velocity *= 0.98;
+    }
+
+    fn render(&self) {
+        let alpha = self.lifetime.clamp(0.0, 1.0);
+        draw_circle(
+            self.position.x,
+            self.position.y,
+            self.size * self.lifetime,
+            Color::new(1.0, 1.0, 1.0, alpha),
+        );
+    }
+}
+
 struct Game {
     width: f32,
     height: f32,
@@ -170,6 +206,7 @@ struct Game {
     laser_cooldown: f32,
     laser_cooldown_remaining: f32,
     score: u32,
+    particles: Vec<Particle>,
 }
 impl Game {
     fn new() -> Game {
@@ -190,6 +227,7 @@ impl Game {
             laser_cooldown: 0.2,
             laser_cooldown_remaining: 0.0,
             score: 0,
+            particles: vec![],
         };
         game.generate_asteroids();
         game
@@ -205,6 +243,7 @@ impl Game {
         self.lasers = vec![];
         self.player = Ship::new(center.x, center.y);
         self.score = 0;
+        self.particles = vec![];
     }
 
     fn render(&self) {
@@ -224,6 +263,9 @@ impl Game {
         }
         for l in &self.lasers {
             l.render();
+        }
+        for p in &self.particles {
+            p.render();
         }
     }
 
@@ -270,7 +312,7 @@ impl Game {
         }
 
         // Check for firing
-        const LAZER_VEL: f32 = 400.00;
+        const LAZER_VEL: f32 = 500.00;
         if self.laser_cooldown_remaining <= 0.0 && is_key_down(KeyCode::Space) {
             self.laser_counter += 1;
             let front = self.player.vertices()[1];
@@ -297,7 +339,7 @@ impl Game {
         for a in self.asteroids.iter_mut() {
             a.tick(frame_time);
 
-            // destroy offscreen asteroids
+            // destroy off-screen asteroids
             if a.position.x > self.width + a.radius
                 || a.position.y > self.height + a.radius
                 || a.position.x < -a.radius
@@ -331,6 +373,15 @@ impl Game {
 
                         // Split asteroid
                         if a.radius > 20.0 {
+                            // Create particle effects
+                            for _ in 0..15 {
+                                self.particles.push(Particle::new(
+                                    a.position.x,
+                                    a.position.y,
+                                    gen_range(100.0, 300.0),
+                                ));
+                            }
+
                             let new_radius = a.radius / 2.0;
                             split_asteroids.push(Asteroid::new(
                                 a.position.x,
@@ -357,7 +408,7 @@ impl Game {
                 }
             }
 
-            // check for offscreen lasers
+            // check for off-screen lasers
             if l.position.x > self.width
                 || l.position.y > self.height
                 || l.position.x < 0.0
@@ -384,6 +435,10 @@ impl Game {
         self.generate_asteroids();
 
         self.asteroids.extend(split_asteroids);
+
+        // Update particles
+        self.particles.iter_mut().for_each(|p| p.tick(frame_time));
+        self.particles.retain(|p| p.lifetime > 0.0);
     }
 
     fn generate_asteroids(&mut self) {
@@ -398,109 +453,163 @@ impl Game {
         let speed = 100.0;
         let angle_variation_degrees = 30.0;
 
+        // Helper function to check if a new asteroid overlaps with existing ones
+        let check_overlap = |new_pos: &Vec2, new_radius: f32, existing: &Vec<Asteroid>| -> bool {
+            for asteroid in existing {
+                let min_distance = new_radius + asteroid.radius + 10.0; // 10px padding
+                if distance(new_pos, &asteroid.position) < min_distance {
+                    return true;
+                }
+            }
+            false
+        };
+
         // Left boundary
         for _ in 0..asteroids_per_boundary {
-            let radius: f32 = gen_range(min_radius, max_radius);
-            let y: f32 = gen_range(radius, self.height - radius);
+            let mut attempts = 0;
+            let max_attempts = 10;
+            
+            while attempts < max_attempts {
+                let radius: f32 = gen_range(min_radius, max_radius);
+                let y: f32 = gen_range(radius, self.height - radius);
+                let position = Vec2::new(0.0, y);
+                
+                if !check_overlap(&position, radius, &self.asteroids) {
+                    let delta_x = self.center.x;
+                    let delta_y = self.center.y - y;
 
-            let delta_x = self.center.x;
-            let delta_y = self.center.y - y;
+                    let angle_toward_center = delta_y.atan2(delta_x).to_degrees();
 
-            let angle_toward_center = delta_y.atan2(delta_x).to_degrees();
+                    // add random variation to the angle
+                    let angle =
+                        (angle_toward_center + gen_range(0.0, angle_variation_degrees)).to_radians();
+                    let x_vel = speed * angle.cos();
+                    let y_vel = speed * angle.sin();
 
-            // add random variation to the angle
-            let angle =
-                (angle_toward_center + gen_range(0.0, angle_variation_degrees)).to_radians();
-            let x_vel = speed * angle.cos();
-            let y_vel = speed * angle.sin();
-
-            self.asteroid_counter += 1;
-            self.asteroids.push(Asteroid::new(
-                0.0,
-                y,
-                x_vel,
-                y_vel,
-                radius,
-                self.asteroid_counter,
-            ))
+                    self.asteroid_counter += 1;
+                    self.asteroids.push(Asteroid::new(
+                        0.0,
+                        y,
+                        x_vel,
+                        y_vel,
+                        radius,
+                        self.asteroid_counter,
+                    ));
+                    break;
+                }
+                attempts += 1;
+            }
         }
 
         // Top boundary
         for _ in 0..asteroids_per_boundary {
-            let radius: f32 = gen_range(min_radius, max_radius);
-            let x: f32 = gen_range(radius, self.width - radius);
-            let delta_x = self.center.x - x;
-            let delta_y = self.center.y;
+            let mut attempts = 0;
+            let max_attempts = 10;
+            
+            while attempts < max_attempts {
+                let radius: f32 = gen_range(min_radius, max_radius);
+                let x: f32 = gen_range(radius, self.width - radius);
+                let position = Vec2::new(x, 0.0);
+                
+                if !check_overlap(&position, radius, &self.asteroids) {
+                    let delta_x = self.center.x - x;
+                    let delta_y = self.center.y;
 
-            let angle_toward_center = delta_y.atan2(delta_x).to_degrees();
+                    let angle_toward_center = delta_y.atan2(delta_x).to_degrees();
 
-            // add random variation to the angle
-            let angle =
-                (angle_toward_center + gen_range(0.0, angle_variation_degrees)).to_radians();
-            let x_vel = speed * angle.cos();
-            let y_vel = speed * angle.sin();
+                    // add random variation to the angle
+                    let angle =
+                        (angle_toward_center + gen_range(0.0, angle_variation_degrees)).to_radians();
+                    let x_vel = speed * angle.cos();
+                    let y_vel = speed * angle.sin();
 
-            self.asteroid_counter += 1;
-            self.asteroids.push(Asteroid::new(
-                x,
-                0.0,
-                x_vel,
-                y_vel,
-                radius,
-                self.asteroid_counter,
-            ))
+                    self.asteroid_counter += 1;
+                    self.asteroids.push(Asteroid::new(
+                        x,
+                        0.0,
+                        x_vel,
+                        y_vel,
+                        radius,
+                        self.asteroid_counter,
+                    ));
+                    break;
+                }
+                attempts += 1;
+            }
         }
 
         // Right boundary
         for _ in 0..asteroids_per_boundary {
-            let radius: f32 = gen_range(min_radius, max_radius);
-            let y: f32 = gen_range(radius, self.height - radius);
-            let delta_x = self.center.x - self.width;
-            let delta_y = self.center.y - y;
+            let mut attempts = 0;
+            let max_attempts = 10;
+            
+            while attempts < max_attempts {
+                let radius: f32 = gen_range(min_radius, max_radius);
+                let y: f32 = gen_range(radius, self.height - radius);
+                let position = Vec2::new(self.width, y);
+                
+                if !check_overlap(&position, radius, &self.asteroids) {
+                    let delta_x = self.center.x - self.width;
+                    let delta_y = self.center.y - y;
 
-            let angle_toward_center = delta_y.atan2(delta_x).to_degrees();
+                    let angle_toward_center = delta_y.atan2(delta_x).to_degrees();
 
-            // add random variation to the angle
-            let angle =
-                (angle_toward_center + gen_range(0.0, angle_variation_degrees)).to_radians();
-            let x_vel = speed * angle.cos();
-            let y_vel = speed * angle.sin();
+                    // add random variation to the angle
+                    let angle =
+                        (angle_toward_center + gen_range(0.0, angle_variation_degrees)).to_radians();
+                    let x_vel = speed * angle.cos();
+                    let y_vel = speed * angle.sin();
 
-            self.asteroid_counter += 1;
-            self.asteroids.push(Asteroid::new(
-                self.width,
-                y,
-                x_vel,
-                y_vel,
-                radius,
-                self.asteroid_counter,
-            ))
+                    self.asteroid_counter += 1;
+                    self.asteroids.push(Asteroid::new(
+                        self.width,
+                        y,
+                        x_vel,
+                        y_vel,
+                        radius,
+                        self.asteroid_counter,
+                    ));
+                    break;
+                }
+                attempts += 1;
+            }
         }
 
         // Bottom boundary
         for _ in 0..asteroids_per_boundary {
-            let radius: f32 = gen_range(min_radius, max_radius);
-            let x: f32 = gen_range(radius, self.width - radius);
-            let delta_x = self.center.x - x;
-            let delta_y = self.center.y - self.height;
+            let mut attempts = 0;
+            let max_attempts = 10;
+            
+            while attempts < max_attempts {
+                let radius: f32 = gen_range(min_radius, max_radius);
+                let x: f32 = gen_range(radius, self.width - radius);
+                let position = Vec2::new(x, self.height);
+                
+                if !check_overlap(&position, radius, &self.asteroids) {
+                    let delta_x = self.center.x - x;
+                    let delta_y = self.center.y - self.height;
 
-            let angle_toward_center = delta_y.atan2(delta_x).to_degrees();
+                    let angle_toward_center = delta_y.atan2(delta_x).to_degrees();
 
-            // add random variation to the angle
-            let angle =
-                (angle_toward_center + gen_range(0.0, angle_variation_degrees)).to_radians();
-            let x_vel = speed * angle.cos();
-            let y_vel = speed * angle.sin();
+                    // add random variation to the angle
+                    let angle =
+                        (angle_toward_center + gen_range(0.0, angle_variation_degrees)).to_radians();
+                    let x_vel = speed * angle.cos();
+                    let y_vel = speed * angle.sin();
 
-            self.asteroid_counter += 1;
-            self.asteroids.push(Asteroid::new(
-                x,
-                self.height,
-                x_vel,
-                y_vel,
-                radius,
-                self.asteroid_counter,
-            ))
+                    self.asteroid_counter += 1;
+                    self.asteroids.push(Asteroid::new(
+                        x,
+                        self.height,
+                        x_vel,
+                        y_vel,
+                        radius,
+                        self.asteroid_counter,
+                    ));
+                    break;
+                }
+                attempts += 1;
+            }
         }
     }
 

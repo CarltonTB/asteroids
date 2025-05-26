@@ -1,3 +1,0 @@
-Asteroids TODO
-- Non-overlapping asteroid generation
-- Add particle effects on asteroid splitting

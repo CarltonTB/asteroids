@@ -28,7 +28,7 @@ impl Ship {
             position: Vec2::new(x, y),
             velocity: Vec2::new(0.0, 0.0),
             health: 5,
-            iframes: 120,
+            iframes: 0,
             rotation: rotation_degrees.to_radians(),
         }
     }
@@ -36,14 +36,17 @@ impl Ship {
     fn render(&self) {
         let vertices = self.vertices();
         if self.health > 0 {
-            draw_triangle_lines(vertices[0], vertices[1], vertices[2], 1.0, WHITE)
+            // Blink when invincible (slower, more visible blinking)
+            if self.iframes == 0 || self.iframes % 20 < 10 {
+                draw_triangle_lines(vertices[0], vertices[1], vertices[2], 1.0, WHITE)
+            }
         }
     }
 
     fn take_hit(&mut self) {
         if self.iframes == 0 && self.health > 0 {
             self.health -= 1;
-            self.iframes = 30;
+            self.iframes = 120; // 2 seconds at 60 FPS
         }
     }
 
@@ -118,6 +121,7 @@ struct Asteroid {
     rotation: f32,
     health: u32,
     num_sides: u8,
+    ignore_collision_with: Option<u32>, // ID of asteroid to ignore collisions with
 }
 impl Asteroid {
     fn new(x_pos: f32, y_pos: f32, x_vel: f32, y_vel: f32, radius: f32, id: u32) -> Asteroid {
@@ -129,6 +133,28 @@ impl Asteroid {
             rotation: 0.0,
             health: 1,
             num_sides: 8,
+            ignore_collision_with: None,
+        }
+    }
+
+    fn new_split(
+        x_pos: f32,
+        y_pos: f32,
+        x_vel: f32,
+        y_vel: f32,
+        radius: f32,
+        id: u32,
+        ignore_id: u32,
+    ) -> Asteroid {
+        Asteroid {
+            id,
+            position: Vec2::new(x_pos, y_pos),
+            velocity: Vec2::new(x_vel, y_vel),
+            radius,
+            rotation: 0.0,
+            health: 1,
+            num_sides: 8,
+            ignore_collision_with: Some(ignore_id),
         }
     }
 
@@ -207,6 +233,7 @@ struct Game {
     laser_cooldown_remaining: f32,
     score: u32,
     particles: Vec<Particle>,
+    death_timer: f32, // Timer to delay game over screen
 }
 impl Game {
     fn new() -> Game {
@@ -228,6 +255,7 @@ impl Game {
             laser_cooldown_remaining: 0.0,
             score: 0,
             particles: vec![],
+            death_timer: 0.0,
         };
         game.generate_asteroids();
         game
@@ -244,6 +272,7 @@ impl Game {
         self.player = Ship::new(center.x, center.y);
         self.score = 0;
         self.particles = vec![];
+        self.death_timer = 0.0;
     }
 
     fn render(&self) {
@@ -336,6 +365,7 @@ impl Game {
         }
 
         let mut remove_asteroid_ids: HashSet<u32> = HashSet::new();
+        let mut split_asteroids_from_collision: Vec<Asteroid> = vec![];
         for a in self.asteroids.iter_mut() {
             a.tick(frame_time);
 
@@ -351,8 +381,127 @@ impl Game {
             // check for collision with player
             for p in self.player.vertices() {
                 if distance(&p, &a.position) < a.radius {
+                    let previous_health = self.player.health;
                     self.player.take_hit();
                     remove_asteroid_ids.insert(a.id);
+                    
+                    // Create explosion effect if ship just died
+                    if previous_health > 0 && self.player.health == 0 {
+                        for _ in 0..30 {
+                            self.particles.push(Particle::new(
+                                self.player.position.x,
+                                self.player.position.y,
+                                gen_range(200.0, 400.0),
+                            ));
+                        }
+                        self.death_timer = 1.0; // 1 second delay before game over
+                    }
+
+                    // Split asteroid on collision with ship
+                    if a.radius > 20.0 {
+                        // Create particle effects
+                        for _ in 0..15 {
+                            self.particles.push(Particle::new(
+                                a.position.x,
+                                a.position.y,
+                                gen_range(100.0, 300.0),
+                            ));
+                        }
+
+                        let new_radius = a.radius / 2.0;
+                        let angle = gen_range(0.0, std::f32::consts::TAU);
+                        let split_speed = 100.0;
+
+                        // Create two asteroids that ignore collisions with each other
+                        let id1 = self.asteroid_counter + 1;
+                        let id2 = self.asteroid_counter + 2;
+
+                        split_asteroids_from_collision.push(Asteroid::new_split(
+                            a.position.x,
+                            a.position.y,
+                            a.velocity.x + split_speed * angle.cos(),
+                            a.velocity.y + split_speed * angle.sin(),
+                            new_radius,
+                            id1,
+                            id2, // Ignore collisions with the other split
+                        ));
+                        split_asteroids_from_collision.push(Asteroid::new_split(
+                            a.position.x,
+                            a.position.y,
+                            a.velocity.x - split_speed * angle.cos(),
+                            a.velocity.y - split_speed * angle.sin(),
+                            new_radius,
+                            id2,
+                            id1, // Ignore collisions with the other split
+                        ));
+                        self.asteroid_counter += 2;
+                    }
+                    break;
+                }
+            }
+        }
+
+        // check for asteroid-to-asteroid collisions and make them bounce
+        for i in 0..self.asteroids.len() {
+            for j in (i + 1)..self.asteroids.len() {
+                // Check if these asteroids should ignore each other
+                let should_ignore = self.asteroids[i].ignore_collision_with
+                    == Some(self.asteroids[j].id)
+                    || self.asteroids[j].ignore_collision_with == Some(self.asteroids[i].id);
+
+                let collision_distance = self.asteroids[i].radius + self.asteroids[j].radius;
+                let dist = distance(&self.asteroids[i].position, &self.asteroids[j].position);
+
+                // Clear ignore flags if asteroids have separated
+                if should_ignore && dist >= collision_distance {
+                    if self.asteroids[i].ignore_collision_with == Some(self.asteroids[j].id) {
+                        self.asteroids[i].ignore_collision_with = None;
+                    }
+                    if self.asteroids[j].ignore_collision_with == Some(self.asteroids[i].id) {
+                        self.asteroids[j].ignore_collision_with = None;
+                    }
+                }
+
+                if dist < collision_distance && dist > 0.0 && !should_ignore {
+                    // Calculate collision normal
+                    let normal = (self.asteroids[j].position - self.asteroids[i].position) / dist;
+
+                    // Relative velocity
+                    let relative_velocity = self.asteroids[j].velocity - self.asteroids[i].velocity;
+
+                    // Relative velocity along collision normal
+                    let velocity_along_normal = relative_velocity.dot(normal);
+
+                    // Don't resolve if velocities are separating
+                    if velocity_along_normal < 0.0 {
+                        // Calculate masses based on radius (assuming uniform density)
+                        let mass1 = self.asteroids[i].radius.powi(2);
+                        let mass2 = self.asteroids[j].radius.powi(2);
+
+                        // Calculate impulse scalar
+                        let impulse = 2.0 * velocity_along_normal / (mass1 + mass2);
+
+                        // Update velocities
+                        self.asteroids[i].velocity += impulse * mass2 * normal;
+                        self.asteroids[j].velocity -= impulse * mass1 * normal;
+
+                        // Separate asteroids to prevent overlap
+                        let overlap = collision_distance - dist;
+                        let separation = normal * (overlap / 2.0 + 1.0);
+                        self.asteroids[i].position -= separation;
+                        self.asteroids[j].position += separation;
+
+                        // Add small particle effect for the bounce
+                        for _ in 0..3 {
+                            let contact_point =
+                                self.asteroids[i].position + normal * self.asteroids[i].radius;
+                            self.particles.push(Particle::new(
+                                contact_point.x,
+                                contact_point.y,
+                                gen_range(50.0, 150.0),
+                            ));
+                        }
+                    }
                 }
             }
         }
@@ -383,21 +532,30 @@ impl Game {
                             }
 
                             let new_radius = a.radius / 2.0;
-                            split_asteroids.push(Asteroid::new(
+                            let angle = gen_range(0.0, std::f32::consts::TAU);
+                            let split_speed = 100.0;
+
+                            // Create two asteroids that ignore collisions with each other
+                            let id1 = self.asteroid_counter + 1;
+                            let id2 = self.asteroid_counter + 2;
+
+                            split_asteroids.push(Asteroid::new_split(
                                 a.position.x,
                                 a.position.y,
-                                -(a.velocity.y / 2.0),
-                                a.velocity.y,
+                                a.velocity.x + split_speed * angle.cos(),
+                                a.velocity.y + split_speed * angle.sin(),
                                 new_radius,
-                                self.asteroid_counter + 1,
+                                id1,
+                                id2, // Ignore collisions with the other split
                             ));
-                            split_asteroids.push(Asteroid::new(
+                            split_asteroids.push(Asteroid::new_split(
                                 a.position.x,
                                 a.position.y,
-                                a.velocity.y / 2.0,
-                                a.velocity.y,
+                                a.velocity.x - split_speed * angle.cos(),
+                                a.velocity.y - split_speed * angle.sin(),
                                 new_radius,
-                                self.asteroid_counter + 2,
+                                id2,
+                                id1, // Ignore collisions with the other split
                             ));
                             self.asteroid_counter += 2;
                         }
@@ -435,10 +593,16 @@ impl Game {
         self.generate_asteroids();
 
         self.asteroids.extend(split_asteroids);
+        self.asteroids.extend(split_asteroids_from_collision);
 
         // Update particles
         self.particles.iter_mut().for_each(|p| p.tick(frame_time));
         self.particles.retain(|p| p.lifetime > 0.0);
+        
+        // Update death timer
+        if self.death_timer > 0.0 {
+            self.death_timer -= frame_time;
+        }
     }
 
     fn generate_asteroids(&mut self) {
@@ -468,12 +632,12 @@ impl Game {
         for _ in 0..asteroids_per_boundary {
             let mut attempts = 0;
             let max_attempts = 10;
-            
+
             while attempts < max_attempts {
                 let radius: f32 = gen_range(min_radius, max_radius);
                 let y: f32 = gen_range(radius, self.height - radius);
                 let position = Vec2::new(0.0, y);
-                
+
                 if !check_overlap(&position, radius, &self.asteroids) {
                     let delta_x = self.center.x;
                     let delta_y = self.center.y - y;
@@ -481,8 +645,8 @@ impl Game {
                     let angle_toward_center = delta_y.atan2(delta_x).to_degrees();
 
                     // add random variation to the angle
-                    let angle =
-                        (angle_toward_center + gen_range(0.0, angle_variation_degrees)).to_radians();
+                    let angle = (angle_toward_center + gen_range(0.0, angle_variation_degrees))
+                        .to_radians();
                     let x_vel = speed * angle.cos();
                     let y_vel = speed * angle.sin();
 
@@ -505,12 +669,12 @@ impl Game {
         for _ in 0..asteroids_per_boundary {
             let mut attempts = 0;
             let max_attempts = 10;
-            
+
             while attempts < max_attempts {
                 let radius: f32 = gen_range(min_radius, max_radius);
                 let x: f32 = gen_range(radius, self.width - radius);
                 let position = Vec2::new(x, 0.0);
-                
+
                 if !check_overlap(&position, radius, &self.asteroids) {
                     let delta_x = self.center.x - x;
                     let delta_y = self.center.y;
@@ -518,8 +682,8 @@ impl Game {
                     let angle_toward_center = delta_y.atan2(delta_x).to_degrees();
 
                     // add random variation to the angle
-                    let angle =
-                        (angle_toward_center + gen_range(0.0, angle_variation_degrees)).to_radians();
+                    let angle = (angle_toward_center + gen_range(0.0, angle_variation_degrees))
+                        .to_radians();
                     let x_vel = speed * angle.cos();
                     let y_vel = speed * angle.sin();
 
@@ -542,12 +706,12 @@ impl Game {
         for _ in 0..asteroids_per_boundary {
             let mut attempts = 0;
             let max_attempts = 10;
-            
+
             while attempts < max_attempts {
                 let radius: f32 = gen_range(min_radius, max_radius);
                 let y: f32 = gen_range(radius, self.height - radius);
                 let position = Vec2::new(self.width, y);
-                
+
                 if !check_overlap(&position, radius, &self.asteroids) {
                     let delta_x = self.center.x - self.width;
                     let delta_y = self.center.y - y;
@@ -555,8 +719,8 @@ impl Game {
                     let angle_toward_center = delta_y.atan2(delta_x).to_degrees();
 
                     // add random variation to the angle
-                    let angle =
-                        (angle_toward_center + gen_range(0.0, angle_variation_degrees)).to_radians();
+                    let angle = (angle_toward_center + gen_range(0.0, angle_variation_degrees))
+                        .to_radians();
                     let x_vel = speed * angle.cos();
                     let y_vel = speed * angle.sin();
 
@@ -579,12 +743,12 @@ impl Game {
         for _ in 0..asteroids_per_boundary {
             let mut attempts = 0;
             let max_attempts = 10;
-            
+
             while attempts < max_attempts {
                 let radius: f32 = gen_range(min_radius, max_radius);
                 let x: f32 = gen_range(radius, self.width - radius);
                 let position = Vec2::new(x, self.height);
-                
+
                 if !check_overlap(&position, radius, &self.asteroids) {
                     let delta_x = self.center.x - x;
                     let delta_y = self.center.y - self.height;
@@ -592,8 +756,8 @@ impl Game {
                     let angle_toward_center = delta_y.atan2(delta_x).to_degrees();
 
                     // add random variation to the angle
-                    let angle =
-                        (angle_toward_center + gen_range(0.0, angle_variation_degrees)).to_radians();
+                    let angle = (angle_toward_center + gen_range(0.0, angle_variation_degrees))
+                        .to_radians();
                     let x_vel = speed * angle.cos();
                     let y_vel = speed * angle.sin();
 
@@ -614,7 +778,7 @@ impl Game {
     }
 
     fn check_game_over(&self) -> bool {
-        if self.player.health == 0 {
+        if self.player.health == 0 && self.death_timer <= 0.0 {
             draw_text_h_centered("Game Over", self.center.y, 48);
             draw_text_h_centered(&format!("Score: {}", self.score), self.center.y + 50.0, 28);
             draw_text_h_centered("Press enter to play again", self.center.y + 100.0, 28);

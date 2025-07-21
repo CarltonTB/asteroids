@@ -384,7 +384,7 @@ impl Game {
                     let previous_health = self.player.health;
                     self.player.take_hit();
                     remove_asteroid_ids.insert(a.id);
-                    
+
                     // Create explosion effect if ship just died
                     if previous_health > 0 && self.player.health == 0 {
                         for _ in 0..30 {
@@ -598,7 +598,7 @@ impl Game {
         // Update particles
         self.particles.iter_mut().for_each(|p| p.tick(frame_time));
         self.particles.retain(|p| p.lifetime > 0.0);
-        
+
         // Update death timer
         if self.death_timer > 0.0 {
             self.death_timer -= frame_time;
@@ -795,8 +795,7 @@ impl Game {
 
 fn window_conf() -> Conf {
     Conf {
-        window_title: String::from("Asteroids"),
-        window_resizable: false,
+        window_title: "Asteroids".to_owned(),
         fullscreen: true,
         ..Default::default()
     }
